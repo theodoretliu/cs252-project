@@ -34,9 +34,21 @@ and expr =
   | EProj of int * expr
   | ELet of string * expr * expr
 
+module VarSet = Set.Make (struct
+  type t = string
+  let compare = compare
+end)
+
 type context = (string * refinement) list
 type world = context * refinement
 type worlds = world list
+
+let x = ref 0
+
+let gen_var () =
+  let var = "gendvar" ^ (string_of_int !x) in
+  let _ = x := !x + 1 in
+  var
 
 (* subtypes *)
 let (<<) (a : refinement) (b : refinement) : bool =
@@ -58,14 +70,45 @@ let rec prj (c : context) (x : string) (r : refinement) : bool =
   | None -> false
   | Some t -> t |>> r
 
+let find_common_vars (w : worlds) : string list =
+  let candidate_vars_set = List.fold_left (fun acc (c, _r) ->
+    let vars, _tipes = List.split c in
+    let var_set = VarSet.of_list vars in
+    VarSet.union acc var_set) VarSet.empty w in
+  VarSet.elements candidate_vars_set
+
 let s_all (w : worlds) : expr option =
   None
 
 let s_ctx (w : worlds) : expr option =
-  failwith "not implemented"
+  let candidate_vars = find_common_vars w in
+  let can_use_var = List.map (fun x ->
+    List.for_all (fun (c, r) ->
+      let r' = List.assoc x c in
+      (r' << r) && (r << Intersection (Base true, Base false))) w)
+    candidate_vars in
+  let zipped = List.combine candidate_vars can_use_var in
+  let filter_zipped = List.filter snd zipped in
+  match filter_zipped with
+  | [] -> None
+  | (x, b) :: _t ->
+      let _ = assert b in
+      Some (EVar x)
 
 let s_rarrow (w : worlds) : expr option =
-  failwith "not implemented"
+  let can_use = List.for_all (fun (_c, r) ->
+    match r with
+    | Arrow _ -> true
+    | _ -> false) w in
+  if not can_use then None else
+  let x = gen_var () in
+  let new_worlds = List.map (fun (c, r) ->
+    match r with
+    | Arrow (r1, r2) -> (x, r1) :: c, r2
+    | _ -> failwith "s_rarrow; impossible") w in
+  match s_all new_worlds with
+  | None -> None
+  | Some s -> Some (ELambda (x, s))
 
 let s_larrow (w : worlds) : expr option =
   failwith "not implemented"
