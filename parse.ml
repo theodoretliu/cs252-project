@@ -88,11 +88,9 @@ let rec prj (c : context) (x : string) (r : refinement) : bool =
   | Some t -> t |>> r
 
 let find_common_vars (w : worlds) : string list =
-  let candidate_vars_set = List.fold_left (fun acc (c, _r) ->
-    let vars, _tipes = List.split c in
-    let var_set = VarSet.of_list vars in
-    VarSet.union acc var_set) VarSet.empty w in
-  VarSet.elements candidate_vars_set
+  match w with
+  | [] -> []
+  | (c, _r) :: _t -> List.map (fun (x, _t) -> x) c
 
 let s_all (w : worlds) : expr option =
   None
@@ -217,7 +215,38 @@ let s_ror1 (w : worlds) : expr option = s_ror_gen true 1 w
 let s_ror2 (w : worlds) : expr option = s_ror_gen true 2 w
 
 let s_lor (w : worlds) : expr option =
-  failwith "not implemented"
+  let rec try_x (r : refinement) : (refinement * refinement) option =
+    match r with
+    | RIntersection (r1, r2) ->
+        let compute = try_x r1 in
+        if compute <> None then compute else
+        try_x r2
+    | RUnion (r1, r2) -> Some (r1, r2)
+    | _ -> None in
+  let try_world ((c, r) : world) : expr option =
+    let rec try_world' (c' : context) : expr option =
+      match c' with
+      | [] -> None
+      | (x, r0) :: t ->
+          match try_x r0 with
+          | None -> try_world' t
+          | Some (r1, r2) ->
+              let remove_worlds = List.filter ((<>) (c', r)) w in
+              let remove_contexts = List.filter (fun (old_x, _r) -> old_x <> x) c' in
+              let new_worlds = ((x, r1) :: remove_contexts, r)
+                :: ((x, r2) :: remove_contexts, r) :: remove_worlds in
+              match s_all new_worlds with
+              | None -> try_world' t
+              | Some s -> Some s in
+    try_world' c in
+  let rec s_lor' w =
+    match w with
+    | [] -> None
+    | wor :: t ->
+        match try_world wor with
+        | None -> s_lor' t
+        | Some s -> Some s in
+  s_lor' w
 
 let s_bool (b : bool) (w : worlds) : expr option =
   if List.for_all (fun (_, r) -> RBase b << r) w then Some (EBase b)
