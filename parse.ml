@@ -97,18 +97,19 @@ let s_all (w : worlds) : expr option =
 
 let s_ctx (w : worlds) : expr option =
   let candidate_vars = find_common_vars w in
-  let can_use_var = List.map (fun x ->
-    List.for_all (fun (c, r) ->
+  let try_x (x : string) : expr option =
+    let is_good (c, r) =
       let r' = List.assoc x c in
-      (r' << r) && (r << RIntersection (RBase true, RBase false))) w)
-    candidate_vars in
-  let zipped = List.combine candidate_vars can_use_var in
-  let filter_zipped = List.filter snd zipped in
-  match filter_zipped with
-  | [] -> None
-  | (x, b) :: _t ->
-      let _ = assert b in
-      Some (EVar x)
+      (r' << r) && (r << RIntersection (RBase true, RBase false)) in
+    if List.for_all is_good w then Some (EVar x) else None in
+  let rec s_ctx' (xs : string list) : expr option =
+    match xs with
+    | [] -> None
+    | x :: t ->
+        match try_x x with
+        | None -> s_ctx' t
+        | Some s -> Some s in
+  s_ctx' candidate_vars
 
 let s_rarrow (w : worlds) : expr option =
   let can_use = List.for_all (fun (_c, r) ->
@@ -127,86 +128,87 @@ let s_rarrow (w : worlds) : expr option =
 
 let s_larrow (w : worlds) : expr option =
   let x1_cands = find_common_vars w in
-  let rec extract_arrows (r : refinement) : refinement option =
+  let rec extract_arrows (r : refinement) : (refinement * refinement) option =
     match r with
     | RIntersection (r1, r2) ->
         begin match extract_arrows r1, extract_arrows r2 with
         | Some a, _ | _, Some a -> Some a
         | _ -> None end
-    | RArrow _ -> Some r
+    | RArrow (rai, rbi) -> Some (rai, rbi)
     | _ -> None in
-  let arrows_cands = List.filter (fun x1 ->
-    List.for_all (fun (_c, r) ->
-      extract_arrows r <> None) w) x1_cands in
-  let arrows = List.map (fun x1 ->
-    let arrows_list = List.map (fun (_c, r) ->
-      let res = extract_arrows r in
-      let _ = assert (res <> None) in
-      res) w in
-    x1, arrows_list) arrows_cands in
-  let remove_maybes_and_arrow = List.map (fun (x1, arrows_list) ->
-    x1, List.map (fun maybe_arrow ->
-      match maybe_arrow with
-      | Some (RArrow (r1, r2)) -> (r1, r2)
-      | _ -> failwith "s_larrow; impossible") arrows_list) arrows in
-  let left_parts, right_parts = List.map (fun (x1, arrows_list) ->
-    (x1, List.map fst arrows_list), (x1, List.map snd arrows_list)) remove_maybes_and_arrow
-    |> List.split in
-  let s1s = List.map (fun (x1, lefts) ->
-    let new_worlds = List.combine (List.map fst w) lefts in
-    x1, s_all new_worlds) left_parts in
-  let x2 = gen_var () in
-  let s2s = List.map (fun (x1, rights) ->
-    let new_worlds = List.map2 (fun (c, r) right ->
-      (x2, right) :: c, r) w rights in
-    s_all new_worlds) right_parts in
-  let rec get_match s1s s2s =
-    match s1s, s2s with
-    | [], [] -> None
-    | (x1, Some s1) :: t1, Some s2 :: t2 -> Some (ELet (EVar x2, EApp (EVar x1, s1), s2))
-    | _ :: t1, _ :: t2 -> get_match t1 t2
-    | _ -> failwith "s_larrow; wrong lengths" in
-  let _ = assert (List.length s1s = List.length s2s) in
-  get_match s1s s2s
+  let try_x1 x1 =
+    let maybe_arrows = List.map (fun (c, _r) ->
+      let xs_ref = List.assoc x1 c in
+      extract_arrows xs_ref) w in
+    if List.exists ((=) None) maybe_arrows then None else
+    let arrows = List.map (fun arr ->
+      match arr with
+      | None -> failwith "s_larrow; impossible"
+      | Some s -> s) maybe_arrows in
+    let left_parts, right_parts = List.split arrows in
+    let new_worlds = List.map2 (fun (c, _r) new_r -> (c, new_r)) w left_parts in
+    match s_all new_worlds with
+    | None -> None
+    | Some s1 ->
+        let x2 = gen_var () in
+        let new_worlds = List.map2 (fun (c, r) new_r ->
+          (x2, new_r) :: c, r) w right_parts in
+        match s_all new_worlds with
+        | None -> None
+        | Some s2 -> Some (ELet (EVar x2, EApp (EVar x1, s1), s2)) in
+  let rec s_larrow' xs =
+    match xs with
+    | [] -> None
+    | x :: t ->
+        match try_x1 x with
+        | None -> s_larrow' t
+        | Some s -> Some s in
+  s_larrow' x1_cands
 
 let s_bot (w : worlds) : expr option =
-  let rec contains_bottom (r : refinement) : bool =
-    match r with
-    | RBottom -> true
-    | RIntersection (r1, r2) -> contains_bottom r1 || contains_bottom r2
-    | _ -> false in
-  let able_to_drop = List.filter (fun (_c, r) -> contains_bottom r) w in
-  let filtered_worlds = List.map (fun world -> List.filter ((<>) world) w) able_to_drop in
-  let results = List.map s_all filtered_worlds in
-  match results with
-  | [] -> None
-  | h :: _t -> h
+  let try_world (c, r) =
+    let try_x x =
+      let r = List.assoc x c in
+      let rec contains_bottom (r : refinement) : bool =
+        match r with
+        | RBottom -> true
+        | RIntersection (r1, r2) -> contains_bottom r1 || contains_bottom r2
+        | _ -> false in
+      contains_bottom r in
+    if not (List.exists (fun (x, _r) -> try_x x) c) then None else
+    let new_worlds = List.filter ((<>) (c, r)) w in
+    s_all new_worlds in
+  let rec s_bot' ws =
+    match ws with
+    | [] -> None
+    | h :: t ->
+        match try_world h with
+        | None -> s_bot' t
+        | Some s -> Some s in
+  s_bot' w
 
 let s_ror_gen (is_or : bool) (i : int) (w : worlds) : expr option =
   assert (i = 1 || i = 2 || not is_or) ;
-  let available_worlds = List.filter (fun (_, r) ->
+  let try_world ((c, r) as wor : world) : expr option =
+    let filtered_worlds = List.filter ((<>) wor) w in
     match r with
-    | RUnion _ -> is_or
-    | RIntersection _ -> not is_or
-    | _ -> false)
-    w in
-  let extract_and (w : world) =
-    match w with
-    | c, RIntersection (r1, r2) -> [(c, r1); (c, r2)]
-    | _ -> failwith "extract_and, impossible" in
-  let extract_or i (w : world) =
-    match w with
-    | c, RUnion (r1, r2) -> [(c, if i = 1 then r1 else r2)]
-    | _ -> failwith "extract_or, impossible" in
-  let new_worlds = List.map (fun world ->
-    let removed = List.filter (fun x -> x <> world) w in
-    let addition = if is_or then extract_or i world else extract_and world in
-    removed @ addition) available_worlds in
-  let attempts = List.map s_all new_worlds in
-  let final = List.filter (fun res -> res <> None) attempts in
-  match final with
-  | [] -> None
-  | h :: _t -> h
+    | RUnion (r1, r2) ->
+        if not is_or then None else
+        if i = 1 then s_all ((c, r1) :: filtered_worlds) else
+        if i = 2 then s_all ((c, r2) :: filtered_worlds) else
+        None
+    | RIntersection (r1, r2) ->
+        if is_or then None else
+        s_all ((c, r1) :: (c, r2) :: filtered_worlds)
+    | _ -> None in
+  let rec s_ror_gen' ws =
+    match ws with
+    | [] -> None
+    | h :: t ->
+        match try_world h with
+        | None -> s_ror_gen' t
+        | Some s -> Some s in
+  s_ror_gen' w
 
 let s_rand (w : worlds) : expr option = s_ror_gen false 0 w
 
@@ -268,50 +270,49 @@ let s_rpair (w : worlds) : expr option =
     | RProduct _ -> true
     | _ -> false) w in
   if not can_use then None else
-  let first_world = List.map (fun (c, r) ->
+  let left_part, right_part = List.map (fun (c, r) ->
     match r with
-    | RProduct (r1, _r2) -> c, r1
-    | _ -> failwith "s_rpair; impossible") w in
-  let second_world = List.map (fun (c, r) ->
-    match r with
-    | RProduct (_r1, r2) -> c, r2
-    | _ -> failwith "s_rpair; impossible") w in
+    | RProduct (r1, r2) -> (r1, r2)
+    | _ -> failwith "s_rpair; impossible") w |> List.split in
+  let first_world = List.map2 (fun (c, _r) r' -> (c, r')) w left_part in
+  let second_world = List.map2 (fun (c, _r) r' -> (c, r')) w right_part in
   match s_all first_world, s_all second_world with
   | Some s1, Some s2 -> Some (EPair (s1, s2))
   | _ -> None
 
 let s_lpair (w : worlds) : expr option =
   let x_cands = find_common_vars w in
-  let rec get_product_tipes (r : refinement) : refinement option =
-    match r with
-    | RIntersection (r1, r2) ->
-        let try_r1 = get_product_tipes r1 in
-        if try_r1 <> None then try_r1 else
-        get_product_tipes r2
-    | RProduct (r1, r2) -> Some r
-    | _ -> None in
-  let x_union_cands = List.filter (fun x ->
-    List.for_all (fun (c, _r) ->
-      let rf = List.assoc x c in
-      get_product_tipes rf <> None) w) x_cands in
-  let unions = List.map (fun x ->
-    x, List.map (fun (c, _r) ->
-      let rf = List.assoc x c in
-      let res = get_product_tipes rf in
-      let _ = assert (res <> None) in
-      match res with
-      | Some (RProduct (rai, rbi)) -> rai, rbi
-      | _ -> failwith "s_lpair; impossible") w) x_union_cands in
-  let x1, x2 = gen_var (), gen_var () in
-  let new_worlds = List.map (fun (x, unions) ->
-    x, List.map2 (fun (rai, rbi) (c, r) ->
-      (x1, rai) :: (x2, rbi) :: c, r) unions w) unions in
-  let try_s = List.map (fun (x, w) ->
-    x, s_all w) new_worlds in
-  match try_s with
-  | [] -> None
-  | (x, Some s) :: _t -> Some (ELet (EPair (EVar x1, EVar x2), EVar x, s))
-  | _ -> None
+  let try_x x =
+    let rec get_product_tipes (r : refinement) : (refinement * refinement) option =
+      match r with
+      | RIntersection (r1, r2) ->
+          let try_r1 = get_product_tipes r1 in
+          if try_r1 <> None then try_r1 else
+          get_product_tipes r2
+      | RProduct (r1, r2) -> Some (r1, r2)
+      | _ -> None in
+    let product_tipes = List.map (fun (c, _r) ->
+      let r = List.assoc x c in
+      get_product_tipes r) w in
+    if List.exists ((=) None) product_tipes then None else
+    let remove_option = List.map (fun s ->
+      match s with
+      | None -> failwith "s_lpair; impossible"
+      | Some s -> s) product_tipes in
+    let x1, x2 = gen_var (), gen_var () in
+    let new_worlds = List.map2 (fun (c, r) (rai, rbi) ->
+      (x1, rai) :: (x2, rbi) :: c, r) w remove_option in
+    match s_all new_worlds with
+    | None -> None
+    | Some s -> Some (ELet (EPair (EVar x1, EVar x2), EVar x, s)) in
+  let rec s_lpair' xs =
+    match xs with
+    | [] -> None
+    | x :: t ->
+        match try_x x with
+        | None -> s_lpair' t
+        | Some s -> Some s in
+  s_lpair' x_cands
 
 let rec singleton_to_neg_ref (t : singleton) : neg_refinement =
   match t with
