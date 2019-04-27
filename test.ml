@@ -1,4 +1,5 @@
-open Parse
+open Rules
+open Types
 
 let bool_id =
   let bool_ident_worlds = [

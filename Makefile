@@ -1,9 +1,6 @@
-all: parse test
+all: test
 
-parse: parse.ml lexer.mll
-	ocamlbuild -use-ocamlfind parse.byte
-
-test: test.ml parse.ml lexer.mll
+test: test.ml rules.ml lexer.mll
 	ocamlbuild -use-ocamlfind test.byte
 
 clean:
