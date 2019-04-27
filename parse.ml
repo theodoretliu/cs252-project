@@ -293,7 +293,7 @@ let rec s_all (w : worlds) (depth : int) : expr option =
           | Some s -> Some s in
     s_ite' x_cands in
 
-  let s_sample (w : worlds) : expr option =
+  let _s_sample (w : worlds) : expr option =
     failwith "not implemented" in
 
   let s_rpair (w : worlds) : expr option =
@@ -369,6 +369,14 @@ let rec s_all (w : worlds) (depth : int) : expr option =
         | None -> s_all' t
         | Some s -> Some s  in
   s_all' all_rules
+
+let synth w limit =
+  let rec synth' cur =
+    if cur > limit then None else
+    match s_all w cur with
+    | None -> synth' (cur + 1)
+    | Some s -> Some s in
+  synth' 1
 
 let rec singleton_to_neg_ref (t : singleton) : neg_refinement =
   match t with
