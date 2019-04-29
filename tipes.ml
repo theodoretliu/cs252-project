@@ -5,6 +5,8 @@ type refinement =
   | RIntersection of refinement * refinement
   | RProduct of refinement * refinement
   | RBottom
+  | RCons of refinement * refinement
+  | RNil
   | RNot of neg_refinement
 and neg_refinement =
   | NRBase of bool
@@ -37,6 +39,10 @@ and expr =
   | EPair of expr * expr
   | EProj of int * expr
   | ELet of expr * expr * expr
+  | ECons of expr * expr
+  | ENil
+  | EMatch of expr * (expr * expr) list
+  | EFix of string * string * expr
 
 type context = (string * refinement) list
 type world = context * refinement

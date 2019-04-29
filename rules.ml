@@ -1,4 +1,5 @@
-open Types
+open Tipes
+open Stringify
 
 let get_all_tokens lexbuf =
   let rec helper lexbuf carry =
@@ -13,6 +14,8 @@ let get_all_tokens lexbuf =
   let tokens = get_all_tokens lexbuf  in
   print_endline (Lexer.token_list_to_string tokens) *)
 
+let count = ref 0
+
 module VarSet = Set.Make (struct
   type t = string
   let compare = compare
@@ -26,8 +29,10 @@ let gen_var () =
   var
 
 (* subtypes *)
-let (<<) (a : refinement) (b : refinement) : bool =
-  a = b
+let rec (<<) (a : refinement) (b : refinement) : bool =
+  match b with
+  | RUnion (b1, b2) -> a << b1 || a << b2
+  | _ -> a = b
 
 let rec (|>>) r' r =
   let prj_left (r : refinement) (r' : refinement) : bool =
@@ -50,15 +55,35 @@ let find_common_vars (w : worlds) : string list =
   | [] -> []
   | (c, _r) :: _t -> List.map (fun (x, _t) -> x) c
 
+let rec refinement_list_to_union (refs : refinement list) : refinement =
+  match refs with
+  | [] -> failwith "invalid list"
+  | [h] -> h
+  | h :: t -> RUnion (h, refinement_list_to_union t)
+
+let rec refinement_list_to_intersection (refs : refinement list) : refinement =
+  match refs with
+  | [] -> RBottom
+  | [h] -> h
+  | h :: t -> RIntersection (h, refinement_list_to_intersection t)
+
+let rec enumerate_possible (ll : 'a list list) =
+  match ll with
+  | [] -> [[]]
+  | h :: t ->
+      let end_poss = enumerate_possible t in
+      List.map (fun x -> List.map (fun c -> x :: c) end_poss) h |> List.flatten
+
 let rec s_all (w : worlds) (depth : int) : expr option =
   if depth = 0 then None else
+
 
   let s_ctx (w : worlds) : expr option =
     let candidate_vars = find_common_vars w in
     let try_x (x : string) : expr option =
       let is_good (c, r) =
         let r' = List.assoc x c in
-        (r' << r) && (r << RIntersection (RBase true, RBase false)) in
+        (r' << r) in
       if List.for_all is_good w then Some (EVar x) else None in
     let rec s_ctx' (xs : string list) : expr option =
       match xs with
@@ -86,34 +111,45 @@ let rec s_all (w : worlds) (depth : int) : expr option =
 
   let s_larrow (w : worlds) : expr option =
     let x1_cands = find_common_vars w in
-    let rec extract_arrows (r : refinement) : (refinement * refinement) option =
+    let rec extract_arrows (r : refinement) : (refinement * refinement) list option =
       match r with
       | RIntersection (r1, r2) ->
           begin match extract_arrows r1, extract_arrows r2 with
-          | Some a, _ | _, Some a -> Some a
-          | _ -> None end
-      | RArrow (rai, rbi) -> Some (rai, rbi)
+          | None, None -> None
+          | None, Some l | Some l, None -> Some l
+          | Some l1, Some l2 -> Some (l1 @ l2) end
+      | RArrow (rai, rbi) -> Some [(rai, rbi)]
       | _ -> None in
     let try_x1 x1 =
       let maybe_arrows = List.map (fun (c, _r) ->
         let xs_ref = List.assoc x1 c in
         extract_arrows xs_ref) w in
       if List.exists ((=) None) maybe_arrows then None else
-      let arrows = List.map (fun arr ->
-        match arr with
-        | None -> failwith "s_larrow; impossible"
-        | Some s -> s) maybe_arrows in
-      let left_parts, right_parts = List.split arrows in
-      let new_worlds = List.map2 (fun (c, _r) new_r -> (c, new_r)) w left_parts in
-      match s_all new_worlds (depth - 1) with
-      | None -> None
-      | Some s1 ->
-          let x2 = gen_var () in
-          let new_worlds = List.map2 (fun (c, r) new_r ->
-            (x2, new_r) :: c, r) w right_parts in
-          match s_all new_worlds (depth - 1) with
-          | None -> None
-          | Some s2 -> Some (ELet (EVar x2, EApp (EVar x1, s1), s2)) in
+      let try_arrows (arrows : (refinement * refinement) list) : expr option =
+        let left_parts, right_parts = List.split arrows in
+        let new_worlds = List.map2 (fun (c, _r) new_r -> (c, new_r)) w left_parts in
+        match s_all new_worlds (depth - 1) with
+        | None -> None
+        | Some s1 ->
+            let x2 = gen_var () in
+            let new_worlds = List.map2 (fun (c, r) new_r ->
+              (x2, new_r) :: c, r) w right_parts in
+            match s_all new_worlds (depth - 1) with
+            | None -> None
+            | Some s2 -> Some (ELet (EVar x2, EApp (EVar x1, s1), s2)) in
+      let strip_maybes = List.map (fun x ->
+        match x with
+        | Some s -> s
+        | None -> failwith "impossible; s_larrow") maybe_arrows in
+      let arrow_combs = enumerate_possible strip_maybes in
+      let rec try_x1' remaining_combs =
+        match remaining_combs with
+        | [] -> None
+        | h :: t ->
+            match try_arrows h with
+            | None -> try_x1' t
+            | Some s -> Some s in
+      try_x1' arrow_combs in
     let rec s_larrow' xs =
       match xs with
       | [] -> None
@@ -225,7 +261,7 @@ let rec s_all (w : worlds) (depth : int) : expr option =
         | RIntersection (r1, r2) ->
             let res = extract_true_false r1 in
             if res <> None then res else
-            extract_true_false r1
+            extract_true_false r2
         | _ -> None in
       let true_falses = List.map (fun (c, r) ->
         let r = List.assoc x c in
@@ -304,28 +340,121 @@ let rec s_all (w : worlds) (depth : int) : expr option =
           | Some s -> Some s in
     s_lpair' x_cands in
 
+  let s_fix (w : worlds) : expr option =
+    let can_use = List.for_all (fun (_c, r) ->
+      match r with
+      | RArrow _ -> true
+      | _ -> false) w in
+    if not can_use then None else
+    let x, f = gen_var (), gen_var () in
+    let fun_ref = List.map snd w in
+    let arrow_pairs = List.map (fun (_c, r) ->
+      match r with
+      | RArrow (ra, rb) -> ra, rb
+      | _ -> failwith "impossible s_fix") w in
+    let new_worlds =
+      List.map2 (fun (ra, rb) (c, r) ->
+        (x, ra)
+          :: (f, List.filter ((<>) r) fun_ref |> refinement_list_to_intersection)
+          :: c, rb) arrow_pairs w in
+    match s_all new_worlds (depth - 1) with
+    | None -> None
+    | Some s -> Some (EFix (f, x, s)) in
+
+  let s_match_list (w : worlds) : expr option =
+    let x_cands = find_common_vars w in
+    let try_x x =
+      let rec get_list_construct r =
+        match r with
+        | RCons _ | RNil -> Some r
+        | RIntersection (r1, r2) ->
+            let res = get_list_construct r1 in
+            if res <> None then res else
+            get_list_construct r2
+        | _ -> None in
+      let list_constructs = List.map (fun (c, _r) ->
+        let r = List.assoc x c in
+        get_list_construct r) w in
+      if List.exists ((=) None) list_constructs then None else
+      let nil_worlds = List.filter (fun (wor, con) -> con = Some RNil)
+                                   (List.combine w list_constructs) |> List.map fst in
+      let con_worlds = List.filter (fun (wor, con) ->
+        match con with
+        | Some (RCons _) -> true
+        | _ -> false) (List.combine w list_constructs) in
+      match s_all nil_worlds (depth - 1) with
+      | None -> None
+      | Some s1 ->
+          let h, t = gen_var (), gen_var () in
+          let new_worlds = List.map (fun ((c, r), con) ->
+            match con with
+            | Some (RCons (h', t')) -> (h, h') :: (t, t') :: c, r
+            | _ -> failwith "impossible; s_match_list") con_worlds in
+          match s_all new_worlds (depth - 1) with
+          | None -> None
+          | Some s2 ->
+              Some (EMatch (EVar x, [
+                ENil, s1 ;
+                ECons (EVar h, EVar t), s2
+              ])) in
+    let rec s_match_list' xs =
+      match xs with
+      | [] -> None
+      | h :: t ->
+          match try_x h with
+          | None -> s_match_list' t
+          | Some s -> Some s in
+    s_match_list' x_cands in
+
+  let s_nil (w : worlds) : expr option =
+    let can_use =
+      List.for_all (fun (_c, r) -> RNil << r) w in
+    if not can_use then None else Some ENil in
+
+  let s_cons (w : worlds) : expr option =
+    let can_use =
+      List.for_all (fun (_c, r) ->
+        match r with
+        | RCons _ -> true
+        | _ -> false) w in
+    if not can_use then None else
+    let first_worlds, second_worlds = List.map (fun (c, r) ->
+      match r with
+      | RCons (h, t) -> (c, h), (c, t)
+      | _ -> failwith "impossible; s_cons") w |> List.split in
+    match s_all first_worlds (depth - 1) with
+    | None -> None
+    | Some s1 ->
+        match s_all second_worlds (depth - 1) with
+        | None -> None
+        | Some s2 -> Some (ECons (s1, s2)) in
+
   let all_rules = [
-    s_ctx ;
-    s_rarrow ;
-    s_larrow ;
-    s_bot ;
-    s_rand ;
-    s_ror1 ;
-    s_ror2 ;
-    s_lor ;
-    s_true ;
-    s_false ;
-    s_ite ;
-    s_rpair ;
-    s_lpair ;
+    "ctx", s_ctx ;
+    "rarrow", s_rarrow ;
+    "larrow", s_larrow ;
+    "bot", s_bot ;
+    "rand", s_rand ;
+    "ror1", s_ror1 ;
+    "ror2", s_ror2 ;
+    "lor", s_lor ;
+    "true", s_true ;
+    "false", s_false ;
+    "ite", s_ite ;
+    "rpair", s_rpair ;
+    "lpair", s_lpair ;
+    "fix", s_fix ;
+    "match_list", s_match_list ;
+    "nil", s_nil ;
+    "cons", s_cons ;
   ] in
   let rec s_all' rules =
     match rules with
     | [] -> None
-    | h :: t ->
+    | (name, h) :: t ->
         match h w with
         | None -> s_all' t
-        | Some s -> Some s  in
+        | Some s -> Some s in
   s_all' all_rules
 
 let synth w limit =
