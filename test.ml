@@ -2,79 +2,126 @@ open Rules
 open Tipes
 open Stringify
 
+let (@>) a b = RArrow (a, b)
+
+let rec (!/) l =
+  match l with
+  | [] -> RNil
+  | h :: t -> RCons (RBase h, !/ t)
+
 let bool_id = [
-  [], RArrow (RBase true, RBase true) ;
-  [], RArrow (RBase false, RBase false)
+  [], RBase true @> RBase true ;
+  [], RBase false @> RBase false ;
 ]
 
 let bool_neg = [
-  [], RArrow (RBase false, RBase true) ;
-  [], RArrow (RBase true, RBase false)
+  [], RBase false @> RBase true ;
+  [], RBase true @> RBase false ;
 ]
 
 let bool_or = [
-  [], RArrow (RBase false, RArrow (RBase true, RBase true)) ;
-  [], RArrow (RBase false, RArrow (RBase false, RBase false)) ;
-  [], RArrow (RBase true, RArrow (RBase false, RBase true))
+  [], RBase false @> RBase true @> RBase true ;
+  [], RBase false @> RBase false @> RBase false ;
+  [], RBase true @> RBase false @> RBase true ;
 ]
 
 let bool_uncurry_and = [
-  [], RArrow (RProduct (RBase false, RBase true), RBase false) ;
-  [], RArrow (RProduct (RBase true, RBase true), RBase true) ;
-  [], RArrow (RProduct (RBase true, RBase false), RBase false)
+  [], RProduct (RBase false, RBase true) @> RBase false ;
+  [], RProduct (RBase true, RBase true) @> RBase true ;
+  [], RProduct (RBase true, RBase false) @> RBase false ;
+]
+
+let bool_impl = [
+  [], RBase false @> RBase false @> RBase true ;
+  [], RBase false @> RBase true @> RBase true ;
+  [], RBase true @> RBase false @> RBase false ;
+  [], RBase true @> RBase true @> RBase true ;
+]
+
+let bool_xor = [
+  [], RBase false @> RBase false @> RBase false ;
+  [], RBase false @> RBase true @> RBase true ;
+  [], RBase true @> RBase false @> RBase true ;
+  [], RBase true @> RBase true @> RBase false ;
 ]
 
 let list_head = [
-  [], RArrow (RNil, RBase false) ;
-  [], RArrow (RCons (RBase false, RNil), RBase false) ;
-  [], RArrow (RCons (RBase true, RNil), RBase true) ;
-  [], RArrow (RCons (RBase false, RCons (RBase true, RNil)), RBase false) ;
+  [], !/ [] @> RBase false ;
+  [], !/ [false] @> RBase false ;
+  [], !/ [true] @> RBase true ;
+  [], !/ [false; true] @> RBase false ;
 ]
 
 let not_list_head = [
-  [], RArrow (RNil, RBase true) ;
-  [], RArrow (RCons (RBase false, RNil), RBase true) ;
-  [], RArrow (RCons (RBase true, RNil), RBase false) ;
-  [], RArrow (RCons (RBase false, RCons (RBase true, RNil)), RBase true) ;
+  [], !/ [] @> RBase true ;
+  [], !/ [false] @> RBase true ;
+  [], !/ [true] @> RBase false ;
+  [], !/ [false; true] @> RBase true ;
 ]
 
 let list_tail = [
-  [], RArrow (RNil, RNil) ;
-  [], RArrow (RCons (RBase false, RNil), RNil) ;
-  [], RArrow (RCons (RBase false, RCons (RBase false, RNil)),
-              RCons (RBase false, RNil)) ;
+  [], !/ [] @> !/ [] ;
+  [], !/ [false] @> !/ [] ;
+  [], !/ [false; false] @> !/ [false] ;
 ]
 
 let list_id = [
-  [], RArrow (RNil, RNil) ;
-  [], RArrow (RCons (RBase false, RNil), RCons (RBase false, RNil)) ;
-  [], RArrow (RCons (RBase true, RNil), RCons (RBase true, RNil)) ;
-  [], RArrow (RCons (RBase false, RCons (RBase false, RNil)),
-              RCons (RBase false, RCons (RBase false, RNil)))
+  [], !/ [] @> !/ [] ;
+  [], !/ [false] @> !/ [false] ;
+  [], !/ [true] @> !/ [true] ;
+  [], !/ [false; false] @> !/ [false; false] ;
 ]
 
 let not_of_list = [
-  [], RArrow (RNil, RNil) ;
-  [], RArrow (RCons (RBase false, RNil), RCons (RBase true, RNil)) ;
-  [], RArrow (RCons (RBase true, RNil), RCons (RBase false, RNil)) ;
-  [], RArrow (RCons (RBase false, RCons (RBase false, RNil)),
-              RCons (RBase true, RCons (RBase true, RNil))) ;
+  [], !/ [] @> !/ [] ;
+  [], !/ [false] @> !/ [true] ;
+  [], !/ [true] @> !/ [false] ;
+  [], !/ [false; false] @> !/ [true; true] ;
 ]
 
 let list_and = [
-  [], RArrow (RNil, RBase true) ;
-  [], RArrow (RCons (RBase true, RNil), RBase true) ;
-  [], RArrow (RCons (RBase false, RNil), RBase false) ;
-  [], RArrow (RCons (RBase true, RCons (RBase false, RNil)), RBase false) ;
-  [], RArrow (RCons (RBase false, RCons (RBase false, RNil)), RBase false) ;
-  [], RArrow (RCons (RBase true, RCons (RBase true, RNil)), RBase true) ;
-  [], RArrow (RCons (RBase false, RCons (RBase true, RNil)), RBase false) ;
+  [], !/ [] @> RBase true ;
+  [], !/ [true] @> RBase true ;
+  [], !/ [false] @> RBase false ;
+  [], !/ [true; false] @> RBase false ;
+  [], !/ [false; false] @> RBase false ;
+  [], !/ [false; true] @> RBase false ;
+  [], !/ [true; true] @> RBase true ;
+]
+
+let list_or = [
+  [], !/ [] @> RBase false ;
+  [], !/ [true] @> RBase true ;
+  [], !/ [false] @> RBase false ;
+  [], !/ [true; false] @> RBase true ;
+  [], !/ [false; true] @> RBase true ;
+]
+
+let list_cons = [
+  [], RBase true @> !/ [] @> !/ [true] ;
+  [], RBase false @> !/ [] @> !/ [false] ;
+]
+
+let list_append = [
+  [], !/ [] @> !/ [] @> !/ [] ;
+  [], !/ [] @> !/ [false] @> !/ [false] ;
+  [], !/ [] @> !/ [true] @> !/ [true] ;
+  [], !/ [true] @> !/ [] @> !/ [true] ;
+  [], !/ [false] @> !/ [] @> !/ [false] ;
+  [], !/ [true] @> !/ [false] @> !/ [true; false] ;
+  [], !/ [false] @> !/ [false] @> !/ [false; false] ;
+  [], !/ [true] @> !/ [true] @> !/ [true; true] ;
+  [], !/ [false] @> !/ [true] @> !/ [false; true] ;
+  (* [], !/ [false] @> !/ [false; false] @> !/ [false; false; false] ; *)
+  [], !/ [false; true] @> !/ [true] @> !/ [false; true; true] ;
+  [], !/ [true; true] @> !/ [true] @> !/ [true; true; true] ;
+  (* [], !/ [true; false] @> !/ [false; false] @> !/ [true; false; false; false] ; *)
 ]
 
 let test (name, worlds) =
   let _ = print_endline name in
   let start = Sys.time () in
-  let res = synth worlds 15 in
+  let res = synth worlds 20 in
   let end_time = Sys.time () in
   let _ = print_float (end_time -. start) in
   let _ = print_newline () in
@@ -87,10 +134,15 @@ let _ =
     "bool neg", bool_neg ;
     "bool or", bool_or ;
     "bool uncurry and", bool_uncurry_and ;
+    "bool impl", bool_impl ;
+    "bool xor", bool_xor ;
     "list head", list_head ;
     "not list head", not_list_head ;
     "list tail", list_tail ;
     "list id", list_id ;
     "not of list", not_of_list ;
     "list and", list_and ;
+    "list or", list_or ;
+    "list cons", list_cons ;
+    "list append", list_append ;
   ]

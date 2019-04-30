@@ -1,19 +1,6 @@
 open Tipes
 open Stringify
 
-let get_all_tokens lexbuf =
-  let rec helper lexbuf carry =
-    match Lexer.token lexbuf with
-    | Lexer.EOF -> carry @ [Lexer.EOF]
-    | _ as e -> helper lexbuf (carry @ [e]) in
-  helper lexbuf []
-
-  (* let _ = *)
-  (* let file = open_in "test.ml" in
-  let lexbuf = Lexing.from_channel file in
-  let tokens = get_all_tokens lexbuf  in
-  print_endline (Lexer.token_list_to_string tokens) *)
-
 let count = ref 0
 
 module VarSet = Set.Make (struct
@@ -74,9 +61,8 @@ let rec enumerate_possible (ll : 'a list list) =
       let end_poss = enumerate_possible t in
       List.map (fun x -> List.map (fun c -> x :: c) end_poss) h |> List.flatten
 
-let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
+let rec s_all (w : worlds) (depth : int) (matches : int) (can_recurse : bool) : expr option =
   if depth = 0 then None else
-
 
   let s_ctx (w : worlds) : expr option =
     let candidate_vars = find_common_vars w in
@@ -105,7 +91,7 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
       match r with
       | RArrow (r1, r2) -> (x, r1) :: c, r2
       | _ -> failwith "s_rarrow; impossible") w in
-    match s_all new_worlds (depth - 1) matches with
+    match s_all new_worlds (depth - 1) matches can_recurse with
     | None -> None
     | Some s -> Some (ELambda (x, s)) in
 
@@ -128,13 +114,13 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
       let try_arrows (arrows : (refinement * refinement) list) : expr option =
         let left_parts, right_parts = List.split arrows in
         let new_worlds = List.map2 (fun (c, _r) new_r -> (c, new_r)) w left_parts in
-        match s_all new_worlds (depth - 1) matches with
+        match s_all new_worlds (depth - 1) matches can_recurse with
         | None -> None
         | Some s1 ->
             let x2 = gen_var () in
             let new_worlds = List.map2 (fun (c, r) new_r ->
               (x2, new_r) :: c, r) w right_parts in
-            match s_all new_worlds (depth - 1) matches with
+            match s_all new_worlds (depth - 1) matches can_recurse with
             | None -> None
             | Some s2 -> Some (ELet (EVar x2, EApp (EVar x1, s1), s2)) in
       let strip_maybes = List.map (fun x ->
@@ -173,7 +159,7 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
         contains_bottom r in
       if not (List.exists (fun (x, _r) -> try_x x) c) then None else
       let new_worlds = List.filter ((<>) (c, r)) w in
-      s_all new_worlds (depth - 1) matches in
+      s_all new_worlds (depth - 1) matches can_recurse in
     let rec s_bot' ws =
       match ws with
       | [] -> None
@@ -190,12 +176,12 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
       match r with
       | RUnion (r1, r2) ->
           if not is_or then None else
-          if i = 1 then s_all ((c, r1) :: filtered_worlds) (depth - 1) matches else
-          if i = 2 then s_all ((c, r2) :: filtered_worlds) (depth - 1) matches else
+          if i = 1 then s_all ((c, r1) :: filtered_worlds) (depth - 1) matches can_recurse else
+          if i = 2 then s_all ((c, r2) :: filtered_worlds) (depth - 1) matches can_recurse else
           None
       | RIntersection (r1, r2) ->
           if is_or then None else
-          s_all ((c, r1) :: (c, r2) :: filtered_worlds) (depth - 1) matches
+          s_all ((c, r1) :: (c, r2) :: filtered_worlds) (depth - 1) matches can_recurse
       | _ -> None in
     let rec s_ror_gen' ws =
       match ws with
@@ -233,7 +219,7 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
                 let remove_contexts = List.filter (fun (old_x, _r) -> old_x <> x) c' in
                 let new_worlds = ((x, r1) :: remove_contexts, r)
                   :: ((x, r2) :: remove_contexts, r) :: remove_worlds in
-                match s_all new_worlds (depth - 1) matches with
+                match s_all new_worlds (depth - 1) matches can_recurse with
                 | None -> try_world' t
                 | Some s -> Some s in
       try_world' c in
@@ -274,10 +260,10 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
         |> List.map fst in
       let falses = List.filter (fun (w, t) -> t = Some false) worlds_and_bools
         |> List.map fst in
-      match s_all trues (depth - 1) matches with
+      match s_all trues (depth - 1) matches can_recurse with
       | None -> None
       | Some s1 ->
-          match s_all falses (depth - 1) matches with
+          match s_all falses (depth - 1) matches can_recurse with
           | None -> None
           | Some s2 -> Some (EIf (EVar x, s1, s2)) in
     let rec s_ite' xs =
@@ -304,7 +290,7 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
       | _ -> failwith "s_rpair; impossible") w |> List.split in
     let first_world = List.map2 (fun (c, _r) r' -> (c, r')) w left_part in
     let second_world = List.map2 (fun (c, _r) r' -> (c, r')) w right_part in
-    match s_all first_world (depth - 1) matches, s_all second_world (depth - 1) matches with
+    match s_all first_world (depth - 1) matches can_recurse, s_all second_world (depth - 1) matches can_recurse with
     | Some s1, Some s2 -> Some (EPair (s1, s2))
     | _ -> None in
 
@@ -330,7 +316,7 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
       let x1, x2 = gen_var (), gen_var () in
       let new_worlds = List.map2 (fun (c, r) (rai, rbi) ->
         (x1, rai) :: (x2, rbi) :: c, r) w remove_option in
-      match s_all new_worlds (depth - 1) matches with
+      match s_all new_worlds (depth - 1) matches can_recurse with
       | None -> None
       | Some s -> Some (ELet (EPair (EVar x1, EVar x2), EVar x, s)) in
     let rec s_lpair' xs =
@@ -359,7 +345,7 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
         (x, ra)
           :: (f, List.filter ((<>) r) fun_ref |> refinement_list_to_intersection)
           :: c, rb) arrow_pairs w in
-    match s_all new_worlds (depth - 1) matches with
+    match s_all new_worlds (depth - 1) matches false with
     | None -> None
     | Some s -> Some (EFix (f, x, s)) in
 
@@ -385,7 +371,7 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
         match con with
         | Some (RCons _) -> true
         | _ -> false) (List.combine w list_constructs) in
-      match s_all nil_worlds (depth - 1) (matches - 1) with
+      match s_all nil_worlds (depth - 1) (matches - 1) can_recurse with
       | None -> None
       | Some s1 ->
           let h, t = gen_var (), gen_var () in
@@ -393,7 +379,7 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
             match con with
             | Some (RCons (h', t')) -> (h, h') :: (t, t') :: c, r
             | _ -> failwith "impossible; s_match_list") con_worlds in
-          match s_all new_worlds (depth - 1) (matches - 1) with
+          match s_all new_worlds (depth - 1) (matches - 1) can_recurse with
           | None -> None
           | Some s2 ->
               Some (EMatch (EVar x, [
@@ -425,10 +411,10 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
       match r with
       | RCons (h, t) -> (c, h), (c, t)
       | _ -> failwith "impossible; s_cons") w |> List.split in
-    match s_all first_worlds (depth - 1) matches with
+    match s_all first_worlds (depth - 1) matches can_recurse with
     | None -> None
     | Some s1 ->
-        match s_all second_worlds (depth - 1) matches with
+        match s_all second_worlds (depth - 1) matches can_recurse with
         | None -> None
         | Some s2 -> Some (ECons (s1, s2)) in
 
@@ -437,6 +423,7 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
     "false", s_false ;
     "ctx", s_ctx ;
     "rarrow", s_rarrow ;
+    "fix", s_fix ;
     "ite", s_ite ;
     "bot", s_bot ;
     "rand", s_rand ;
@@ -445,7 +432,6 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
     "lor", s_lor ;
     "rpair", s_rpair ;
     "lpair", s_lpair ;
-    "fix", s_fix ;
     "larrow", s_larrow ;
     "match_list", s_match_list ;
     "nil", s_nil ;
@@ -463,7 +449,7 @@ let rec s_all (w : worlds) (depth : int) (matches : int) : expr option =
 let synth w limit =
   let rec synth' cur =
     if cur > limit then None else
-    match s_all w cur 1 with
+    match s_all w cur 1 true with
     | None -> synth' (cur + 1)
     | Some s -> Some s in
   synth' 1
