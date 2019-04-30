@@ -58,7 +58,7 @@ let not_of_list = [
   [], RArrow (RCons (RBase false, RNil), RCons (RBase true, RNil)) ;
   [], RArrow (RCons (RBase true, RNil), RCons (RBase false, RNil)) ;
   [], RArrow (RCons (RBase false, RCons (RBase false, RNil)),
-              RCons (RBase true, RCons (RBase true, RNil)))
+              RCons (RBase true, RCons (RBase true, RNil))) ;
 ]
 
 let list_and = [
@@ -66,9 +66,9 @@ let list_and = [
   [], RArrow (RCons (RBase true, RNil), RBase true) ;
   [], RArrow (RCons (RBase false, RNil), RBase false) ;
   [], RArrow (RCons (RBase true, RCons (RBase false, RNil)), RBase false) ;
+  [], RArrow (RCons (RBase false, RCons (RBase false, RNil)), RBase false) ;
   [], RArrow (RCons (RBase true, RCons (RBase true, RNil)), RBase true) ;
-  (* [], RArrow (RCons (RBase false, RCons (RBase true, RNil)), RBase false) ; *)
-  (* [], RArrow (RCons (RBase false, RCons (RBase false, RNil)), RBase false) ; *)
+  [], RArrow (RCons (RBase false, RCons (RBase true, RNil)), RBase false) ;
 ]
 
 let test (name, worlds) =
@@ -92,5 +92,5 @@ let _ =
     "list tail", list_tail ;
     "list id", list_id ;
     "not of list", not_of_list ;
-    (* "list and", list_and ; *)
+    "list and", list_and ;
   ]

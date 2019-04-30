@@ -40,7 +40,9 @@ let rec expr_to_string (e : expr)
         "(let " ^ expr_to_string e1 0 false true ^ " = "
           ^ expr_to_string e2 0 false true ^ " in "
           ^ expr_to_string e3 0 false true ^ ")"
-  | EProj _ -> failwith "not yet supported"
+  | EProj (i, e) ->
+      "Tuple." ^ (if i = 1 then "first" else "second") ^ " "
+        ^ expr_to_string e 0 false true
   | ENil -> "[]"
   | ECons (h, t) ->
       expr_to_string h 0 false inline ^ " :: " ^ expr_to_string t 0 false inline
