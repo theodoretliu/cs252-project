@@ -118,6 +118,22 @@ let list_append = [
   (* [], !/ [true; false] @> !/ [false; false] @> !/ [true; false; false; false] ; *)
 ]
 
+let list_uncurry_append = [
+  [], RProduct(!/ [], !/ []) @> !/ [] ;
+  [], RProduct(!/ [], !/ [false]) @> !/ [false] ;
+  [], RProduct(!/ [], !/ [true]) @> !/ [true] ;
+  [], RProduct(!/ [true], !/ []) @> !/ [true] ;
+  [], RProduct(!/ [false], !/ []) @> !/ [false] ;
+  [], RProduct(!/ [true], !/ [false]) @> !/ [true; false] ;
+  [], RProduct(!/ [false], !/ [false]) @> !/ [false; false] ;
+  [], RProduct(!/ [true], !/ [true]) @> !/ [true; true] ;
+  [], RProduct(!/ [false], !/ [true]) @> !/ [false; true] ;
+  (* [], RProduct(!/ [false], !/ [false; false]) @> !/ [false; false; false] ; *)
+  [], RProduct(!/ [false; true], !/ [true]) @> !/ [false; true; true] ;
+  [], RProduct(!/ [true; true], !/ [true]) @> !/ [true; true; true] ;
+  (* [], RProduct(!/ [true; false], !/ [false; false]) @> !/ [true; false; false; false] ; *)
+]
+
 let test (name, worlds) =
   let _ = print_endline name in
   let start = Sys.time () in
@@ -145,4 +161,5 @@ let _ =
     "list or", list_or ;
     "list cons", list_cons ;
     "list append", list_append ;
+    "list uncurry append", list_uncurry_append ;
   ]
